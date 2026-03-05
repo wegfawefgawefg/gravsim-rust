@@ -1,36 +1,17 @@
-use rand::{thread_rng, Rng};
 use std::time::{Duration, Instant};
+
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::EventLoop;
-use winit::window::WindowBuilder;
 
-const WINDOW_WIDTH: u32 = 1280;
-const WINDOW_HEIGHT: u32 = 720;
-const NUM_PARTICLES: u32 = 2_000_000;
-const G: f32 = 10.0;
-const ENABLE_BOUNDS: bool = true;
-const WORKGROUP_SIZE: u32 = 256;
-const BLOCK_ON_GPU_EACH_FRAME: bool = true;
-const COMPUTE_SHADER: &str = include_str!("wgpu_shaders/compute.wgsl");
-const RENDER_SHADER: &str = include_str!("wgpu_shaders/render.wgsl");
+use crate::config::{
+    gravity_target, BLOCK_ON_GPU_EACH_FRAME, ENABLE_BOUNDS, G, NUM_PARTICLES, WORKGROUP_SIZE,
+};
+use crate::types::{make_particles, SimParams};
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Particle {
-    pos: [f32; 2],
-    vel: [f32; 2],
-}
+const COMPUTE_SHADER: &str = include_str!("shaders/compute.wgsl");
+const RENDER_SHADER: &str = include_str!("shaders/render.wgsl");
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct SimParams {
-    mouse_window: [f32; 4],
-    sim: [f32; 4],
-}
-
-struct GpuState {
+pub struct GpuState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -45,13 +26,12 @@ struct GpuState {
     render_pipeline: wgpu::RenderPipeline,
 
     mouse_pos: [f32; 2],
-    last_frame: Instant,
     frame_counter: u32,
     stats_window_start: Instant,
 }
 
 impl GpuState {
-    async fn new(window: &'static winit::window::Window) -> Self {
+    pub async fn new(window: &'static winit::window::Window) -> Self {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance
@@ -108,16 +88,21 @@ impl GpuState {
         };
         surface.configure(&device, &config);
 
-        let particles = make_particles(NUM_PARTICLES);
+        let particles = make_particles(NUM_PARTICLES, config.width, config.height);
         let particle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("particle_buffer"),
             contents: bytemuck::cast_slice(&particles),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
+        let target = gravity_target(
+            [config.width as f32 * 0.5, config.height as f32 * 0.5],
+            config.width,
+            config.height,
+        );
         let params = SimParams {
-            mouse_window: [WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.5, config.width as f32, config.height as f32],
-            sim: [G, 1.0 / 144.0, if ENABLE_BOUNDS { 1.0 } else { 0.0 }, NUM_PARTICLES as f32],
+            target_window: [target[0], target[1], config.width as f32, config.height as f32],
+            sim: [G, if ENABLE_BOUNDS { 1.0 } else { 0.0 }, NUM_PARTICLES as f32, 0.0],
         };
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("params_buffer"),
@@ -281,14 +266,13 @@ impl GpuState {
             render_bind_group,
             compute_pipeline,
             render_pipeline,
-            mouse_pos: [WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.5],
-            last_frame: Instant::now(),
+            mouse_pos: [self::f32_half(size.width), self::f32_half(size.height)],
             frame_counter: 0,
             stats_window_start: Instant::now(),
         }
     }
 
-    fn resize(&mut self, new_size: PhysicalSize<u32>) {
+    pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
         if new_size.width == 0 || new_size.height == 0 {
             return;
         }
@@ -298,23 +282,24 @@ impl GpuState {
         self.surface.configure(&self.device, &self.config);
     }
 
-    fn set_mouse(&mut self, x: f32, y: f32) {
+    pub fn recover_surface(&mut self) {
+        self.surface.configure(&self.device, &self.config);
+    }
+
+    pub fn set_mouse(&mut self, x: f32, y: f32) {
         self.mouse_pos = [x, y];
     }
 
-    fn render(&mut self, window: &winit::window::Window) -> Result<(), wgpu::SurfaceError> {
-        let now = Instant::now();
-        let dt = (now - self.last_frame).as_secs_f32().clamp(0.0001, 0.05);
-        self.last_frame = now;
-
+    pub fn render(&mut self, window: &winit::window::Window) -> Result<(), wgpu::SurfaceError> {
+        let target = gravity_target(self.mouse_pos, self.config.width, self.config.height);
         let params = SimParams {
-            mouse_window: [
-                self.mouse_pos[0],
-                self.mouse_pos[1],
+            target_window: [
+                target[0],
+                target[1],
                 self.config.width as f32,
                 self.config.height as f32,
             ],
-            sim: [G, dt, if ENABLE_BOUNDS { 1.0 } else { 0.0 }, NUM_PARTICLES as f32],
+            sim: [G, if ENABLE_BOUNDS { 1.0 } else { 0.0 }, NUM_PARTICLES as f32, 0.0],
         };
         self.queue
             .write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&params));
@@ -376,10 +361,10 @@ impl GpuState {
                 NUM_PARTICLES, fps
             ));
             println!(
-                "wgpu stats: particles={} fps={:.1} dt_ms={:.3}",
+                "wgpu stats: particles={} fps={:.1} frame_ms={:.3}",
                 NUM_PARTICLES,
                 fps,
-                (1000.0 / fps.max(0.1))
+                1000.0 / fps.max(0.1)
             );
             self.frame_counter = 0;
             self.stats_window_start = Instant::now();
@@ -389,55 +374,6 @@ impl GpuState {
     }
 }
 
-fn make_particles(count: u32) -> Vec<Particle> {
-    let spawn_center = [WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.5];
-    let spawn_radius = [WINDOW_WIDTH as f32 * 0.25, WINDOW_HEIGHT as f32 * 0.25];
-    let mut rng = thread_rng();
-
-    let mut particles = Vec::with_capacity(count as usize);
-    for _ in 0..count {
-        let pos = [
-            rng.gen_range((spawn_center[0] - spawn_radius[0])..(spawn_center[0] + spawn_radius[0])),
-            rng.gen_range((spawn_center[1] - spawn_radius[1])..(spawn_center[1] + spawn_radius[1])),
-        ];
-        let vel = [rng.gen_range(-2.0..2.0), rng.gen_range(-2.0..2.0)];
-        particles.push(Particle { pos, vel });
-    }
-    particles
-}
-
-fn main() {
-    env_logger::init();
-
-    let event_loop = EventLoop::new().expect("failed to create event loop");
-    let window = WindowBuilder::new()
-        .with_title("gravsim wgpu")
-        .with_inner_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
-        .build(&event_loop)
-        .expect("failed to create window");
-
-    let window_ref: &'static winit::window::Window = Box::leak(Box::new(window));
-    let mut state = pollster::block_on(GpuState::new(window_ref));
-
-    event_loop
-        .run(move |event, target| match event {
-            Event::WindowEvent { window_id, event } if window_id == window_ref.id() => match event {
-                WindowEvent::CloseRequested => target.exit(),
-                WindowEvent::Resized(size) => state.resize(size),
-                WindowEvent::RedrawRequested => match state.render(window_ref) {
-                    Ok(()) => {}
-                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
-                    Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
-                    Err(wgpu::SurfaceError::Outdated)
-                    | Err(wgpu::SurfaceError::Timeout) => {}
-                },
-                WindowEvent::CursorMoved { position, .. } => {
-                    state.set_mouse(position.x as f32, position.y as f32)
-                }
-                _ => {}
-            },
-            Event::AboutToWait => window_ref.request_redraw(),
-            _ => {}
-        })
-        .expect("event loop error");
+fn f32_half(v: u32) -> f32 {
+    v as f32 * 0.5
 }

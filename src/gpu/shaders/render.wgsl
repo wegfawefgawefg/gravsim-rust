@@ -4,7 +4,7 @@ struct Particle {
 };
 
 struct Params {
-    mouse_window: vec4<f32>,
+    target_window: vec4<f32>,
     sim: vec4<f32>,
 };
 
@@ -22,8 +22,8 @@ var<uniform> params: Params;
 @vertex
 fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOut {
     let p = particles[idx].pos;
-    let x = (p.x / params.mouse_window.z) * 2.0 - 1.0;
-    let y = 1.0 - (p.y / params.mouse_window.w) * 2.0;
+    let x = (p.x / params.target_window.z) * 2.0 - 1.0;
+    let y = 1.0 - (p.y / params.target_window.w) * 2.0;
 
     var out: VertexOut;
     out.pos = vec4<f32>(x, y, 0.0, 1.0);

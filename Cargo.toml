@@ -2,6 +2,7 @@
 name = "gravsim-rust"
 version = "0.1.0"
 edition = "2021"
+default-run = "gravsim-rust"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -15,3 +16,11 @@ raylib = "3.7.0"
 rayon = "1.7.0"
 wgpu = "0.19.4"
 winit = "0.29.15"
+
+[[bin]]
+name = "gravsim-rust"
+path = "src/cpu/main.rs"
+
+[[bin]]
+name = "wgpu_main"
+path = "src/gpu/main.rs"
