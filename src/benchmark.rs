@@ -7,8 +7,11 @@ use std::time::Instant;
 
 use crate::bodies::Bodies;
 use crate::config::{DEFAULT_STEP_CHUNK_SIZE, DRAW_BUDGET, WINDOW_CENTER};
-use crate::render::Renderer;
-use crate::sim::{step_kernel_label, step_with_kernel, StepKernel};
+use crate::render::{render_mode_label, RenderMode, Renderer};
+use crate::sim::{
+    step_kernel_label, step_with_kernel, step_with_kernel_collect_draw_indices, DrawSelection,
+    StepKernel,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub enum BenchmarkMode {
@@ -23,6 +26,8 @@ pub struct BenchmarkConfig {
     pub output_path: String,
     pub mode: BenchmarkMode,
     pub step_kernel: StepKernel,
+    pub render_mode: RenderMode,
+    pub fused_step_draw: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -39,6 +44,8 @@ pub fn parse_benchmark_config() -> Option<BenchmarkConfig> {
     let mut output_path = String::from("perf_samples.csv");
     let mut step_kernel_name = String::from("zip");
     let mut chunk_size = DEFAULT_STEP_CHUNK_SIZE;
+    let mut render_mode = RenderMode::Rgba;
+    let mut fused_step_draw = false;
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -94,6 +101,21 @@ pub fn parse_benchmark_config() -> Option<BenchmarkConfig> {
                     process::exit(2);
                 });
             }
+            "--render-mode" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("missing value for --render-mode (expected rgba|bitset)");
+                    process::exit(2);
+                });
+                render_mode = match value.as_str() {
+                    "rgba" => RenderMode::Rgba,
+                    "bitset" => RenderMode::Bitset,
+                    _ => {
+                        eprintln!("invalid --render-mode value: {value} (expected rgba|bitset)");
+                        process::exit(2);
+                    }
+                };
+            }
+            "--fused-step-draw" => fused_step_draw = true,
             _ => {}
         }
     }
@@ -117,6 +139,8 @@ pub fn parse_benchmark_config() -> Option<BenchmarkConfig> {
         output_path,
         mode,
         step_kernel,
+        render_mode,
+        fused_step_draw,
     })
 }
 
@@ -178,13 +202,41 @@ fn run_benchmark_frame(
 
     if !matches!(config.mode, BenchmarkMode::DrawOnly) {
         let step_start = Instant::now();
+        if matches!(config.mode, BenchmarkMode::Full) && config.fused_step_draw {
+            let draw_selection = DrawSelection {
+                draw_offset,
+                draw_budget: DRAW_BUDGET.min(bodies.pos.len()),
+                total_bodies: bodies.pos.len(),
+            };
+            let draw_indices = step_with_kernel_collect_draw_indices(
+                bodies,
+                mouse_pos,
+                config.step_kernel,
+                draw_selection,
+            );
+            step_ms = step_start.elapsed().as_secs_f64() * 1000.0;
+
+            let draw_start = Instant::now();
+            renderer.draw_indices(
+                rl,
+                thread,
+                &draw_indices,
+                mouse_pos,
+                "",
+                false,
+                bodies.pos.len(),
+            );
+            draw_ms = draw_start.elapsed().as_secs_f64() * 1000.0;
+            return FrameSample { step_ms, draw_ms };
+        }
+
         step_with_kernel(bodies, mouse_pos, config.step_kernel);
         step_ms = step_start.elapsed().as_secs_f64() * 1000.0;
     }
 
     if !matches!(config.mode, BenchmarkMode::StepOnly) {
         let draw_start = Instant::now();
-        renderer.draw(rl, thread, &bodies.pos, draw_offset, mouse_pos, "", false);
+        renderer.draw_positions(rl, thread, &bodies.pos, draw_offset, mouse_pos, "", false);
         draw_ms = draw_start.elapsed().as_secs_f64() * 1000.0;
     }
 
@@ -200,10 +252,12 @@ fn write_benchmark_csv(
     let mut writer = BufWriter::new(file);
     writeln!(
         writer,
-        "frame,mode,step_kernel,step_ms,draw_ms,total_ms,step_ratio,draw_ratio"
+        "frame,mode,render_mode,fused_step_draw,step_kernel,step_ms,draw_ms,total_ms,step_ratio,draw_ratio"
     )?;
 
     let mode = benchmark_mode_label(config.mode);
+    let render_mode = render_mode_label(config.render_mode);
+    let fused_step_draw = if config.fused_step_draw { 1 } else { 0 };
     let step_kernel = step_kernel_label(config.step_kernel);
 
     for (i, sample) in samples.iter().enumerate() {
@@ -220,8 +274,17 @@ fn write_benchmark_csv(
         };
         writeln!(
             writer,
-            "{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6}",
-            i, mode, step_kernel, sample.step_ms, sample.draw_ms, total, step_ratio, draw_ratio
+            "{},{},{},{},{},{:.6},{:.6},{:.6},{:.6},{:.6}",
+            i,
+            mode,
+            render_mode,
+            fused_step_draw,
+            step_kernel,
+            sample.step_ms,
+            sample.draw_ms,
+            total,
+            step_ratio,
+            draw_ratio
         )?;
     }
 
@@ -251,8 +314,10 @@ fn print_summary(samples: &[FrameSample], config: &BenchmarkConfig) {
     let p95_total = percentile(&mut total_values, 0.95);
 
     println!(
-        "benchmark done: mode={} step_kernel={} frames={} warmup={} output={}",
+        "benchmark done: mode={} render_mode={} fused_step_draw={} step_kernel={} frames={} warmup={} output={}",
         benchmark_mode_label(config.mode),
+        render_mode_label(config.render_mode),
+        if config.fused_step_draw { "on" } else { "off" },
         step_kernel_label(config.step_kernel),
         samples.len(),
         config.warmup_frames,

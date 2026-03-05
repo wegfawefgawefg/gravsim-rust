@@ -11,7 +11,7 @@ use app::run_interactive;
 use benchmark::{parse_benchmark_config, run_benchmark};
 use bodies::make_bodies;
 use config::WINDOW_DIMS;
-use render::Renderer;
+use render::{RenderMode, Renderer};
 
 fn main() {
     let benchmark = parse_benchmark_config();
@@ -24,7 +24,10 @@ fn main() {
 
     center_window_on_current_monitor(&mut rl);
 
-    let mut renderer = Renderer::new(&mut rl, &thread).unwrap();
+    let render_mode = benchmark
+        .as_ref()
+        .map_or(RenderMode::Rgba, |c| c.render_mode);
+    let mut renderer = Renderer::new(&mut rl, &thread, render_mode).unwrap();
 
     if let Some(config) = benchmark {
         run_benchmark(&mut rl, &thread, &mut bodies, &mut renderer, &config);

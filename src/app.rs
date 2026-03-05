@@ -39,7 +39,7 @@ pub fn run_interactive(
         }
 
         let draw_start = Instant::now();
-        renderer.draw(
+        renderer.draw_positions(
             rl,
             thread,
             &bodies.pos,
