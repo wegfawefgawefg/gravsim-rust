@@ -1,3 +1,4 @@
+mod camera;
 mod config;
 mod state;
 #[path = "../common/types.rs"]
@@ -6,7 +7,7 @@ mod types;
 use config::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use state::ChainGpuState;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
-use winit::event::{ElementState, Event, WindowEvent};
+use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 #[cfg(target_os = "linux")]
@@ -44,6 +45,17 @@ fn main() {
                         if is_escape_pressed(&event) {
                             target.exit();
                         }
+                    }
+                    WindowEvent::MouseInput {
+                        state: button_state,
+                        button: MouseButton::Right,
+                        ..
+                    } => state.set_pan_active(button_state == ElementState::Pressed),
+                    WindowEvent::CursorMoved { position, .. } => {
+                        state.on_cursor_moved(position.x as f32, position.y as f32)
+                    }
+                    WindowEvent::MouseWheel { delta, .. } => {
+                        state.zoom_by_scroll(scroll_steps(delta));
                     }
                     _ => {}
                 }
@@ -83,4 +95,11 @@ fn configure_window_builder(builder: WindowBuilder) -> WindowBuilder {
 fn is_escape_pressed(event: &winit::event::KeyEvent) -> bool {
     event.state == ElementState::Pressed
         && matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape))
+}
+
+fn scroll_steps(delta: MouseScrollDelta) -> f32 {
+    match delta {
+        MouseScrollDelta::LineDelta(_, y) => y,
+        MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 40.0,
+    }
 }
