@@ -1,12 +1,14 @@
 mod config;
 mod state;
+#[path = "../common/types.rs"]
 mod types;
 
 use config::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use state::GpuState;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
-use winit::event::{Event, WindowEvent};
+use winit::event::{ElementState, Event, WindowEvent};
 use winit::event_loop::EventLoop;
+use winit::keyboard::{KeyCode, PhysicalKey};
 #[cfg(target_os = "linux")]
 use winit::platform::x11::{WindowBuilderExtX11, XWindowType};
 use winit::window::Window;
@@ -29,31 +31,34 @@ fn main() {
 
     event_loop
         .run(move |event, target| match event {
-            Event::WindowEvent { window_id, event } if window_id == window_ref.id() => match event {
-                WindowEvent::CloseRequested => target.exit(),
-                WindowEvent::Resized(size) => state.resize(size),
-                WindowEvent::RedrawRequested => match state.render(window_ref) {
-                    Ok(()) => {}
-                    Err(wgpu::SurfaceError::Lost) => state.recover_surface(),
-                    Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
-                    Err(wgpu::SurfaceError::Outdated)
-                    | Err(wgpu::SurfaceError::Timeout) => {}
-                },
-                WindowEvent::CursorMoved { position, .. } => {
-                    state.set_mouse(position.x as f32, position.y as f32)
+            Event::WindowEvent { window_id, event } if window_id == window_ref.id() => {
+                match event {
+                    WindowEvent::CloseRequested => target.exit(),
+                    WindowEvent::Resized(size) => state.resize(size),
+                    WindowEvent::RedrawRequested => match state.render(window_ref) {
+                        Ok(()) => {}
+                        Err(wgpu::SurfaceError::Lost) => state.recover_surface(),
+                        Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
+                        Err(wgpu::SurfaceError::Outdated) | Err(wgpu::SurfaceError::Timeout) => {}
+                    },
+                    WindowEvent::KeyboardInput { event, .. } => {
+                        if is_escape_pressed(&event) {
+                            target.exit();
+                        }
+                    }
+                    WindowEvent::CursorMoved { position, .. } => {
+                        state.set_mouse(position.x as f32, position.y as f32)
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             Event::AboutToWait => window_ref.request_redraw(),
             _ => {}
         })
         .expect("event loop error");
 }
 
-fn center_window_on_primary_monitor(
-    event_loop: &EventLoop<()>,
-    window: &Window,
-) {
+fn center_window_on_primary_monitor(event_loop: &EventLoop<()>, window: &Window) {
     let Some(monitor) = event_loop.primary_monitor() else {
         return;
     };
@@ -77,4 +82,9 @@ fn configure_window_builder(builder: WindowBuilder) -> WindowBuilder {
     {
         builder
     }
+}
+
+fn is_escape_pressed(event: &winit::event::KeyEvent) -> bool {
+    event.state == ElementState::Pressed
+        && matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape))
 }

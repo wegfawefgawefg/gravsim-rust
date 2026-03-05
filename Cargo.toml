@@ -19,8 +19,16 @@ winit = "0.29.15"
 
 [[bin]]
 name = "gravsim-rust"
-path = "src/cpu/main.rs"
+path = "src/cpu/particle_sim/main.rs"
 
 [[bin]]
 name = "wgpu_main"
-path = "src/gpu/main.rs"
+path = "src/gpu/particle_sim/main.rs"
+
+[[bin]]
+name = "chain_cpu"
+path = "src/cpu/chain/main.rs"
+
+[[bin]]
+name = "chain_gpu"
+path = "src/gpu/chain/main.rs"

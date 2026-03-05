@@ -1,7 +1,10 @@
 mod app;
 mod benchmark;
+#[path = "../common/bodies.rs"]
 mod bodies;
+#[path = "../common/config.rs"]
 mod config;
+#[path = "../common/render.rs"]
 mod render;
 mod sim;
 
