@@ -7,8 +7,8 @@ const WINDOW_DIMS: IVec2 = IVec2 { x: 1280, y: 720 };
 const WINDOW_CENTER: Vec2 = Vec2::new(WINDOW_DIMS.x as f32 / 2.0, WINDOW_DIMS.y as f32 / 2.0);
 const FRAMES_PER_SECOND: u32 = 144;
 const TIMESTEP: f32 = 1.0 / FRAMES_PER_SECOND as f32;
-const NUM_BODIES: usize = 2_000_000;
-const G: f32 = 8.0;
+const NUM_BODIES: usize = 10_000_000;
+const G: f32 = 40.0;
 const DRAW_BUDGET: usize = 200_000; // Number of bodies to draw per frame
 const FADE_AMOUNT: u8 = 24; // Amount to subtract from alpha each frame
 const PIXEL_BRIGHTNESS: u8 = 20; // Brightness of pixels
@@ -26,10 +26,16 @@ fn main() {
         .title("Space, the initial frontier.!")
         .build();
 
-    rl.set_window_position(200, 500);
+    let main_monitor = raylib::core::window::get_current_monitor();
+    let main_monitor_width = raylib::core::window::get_monitor_width(main_monitor);
+    let main_monitor_height = raylib::core::window::get_monitor_height(main_monitor);
+    let main_monitor_pos = unsafe { raylib::ffi::GetMonitorPosition(main_monitor) };
+    let centered_x = main_monitor_pos.x as i32 + (main_monitor_width - WINDOW_DIMS.x).max(0) / 2;
+    let centered_y = main_monitor_pos.y as i32 + (main_monitor_height - WINDOW_DIMS.y).max(0) / 2;
+    rl.set_window_position(centered_x, centered_y);
     let mut time_since_last_update = 0.0;
     let mut texture = rl
-        .load_render_texture(WINDOW_DIMS.x as u32, WINDOW_DIMS.y as u32)
+        .load_render_texture(&thread, WINDOW_DIMS.x as u32, WINDOW_DIMS.y as u32)
         .unwrap();
 
     let mut draw_offset = 0;
@@ -97,6 +103,27 @@ fn step(bodies: &mut Vec<Body>, mouse_pos: Vec2) {
         b.pos.y = b.pos.y.max(0.0).min(WINDOW_DIMS.y as f32);
     });
 }
+
+// fn step(bodies: &mut Vec<Body>, mouse_pos: Vec2) {
+//     const CHUNK_SIZE: usize = 4096 * 4; // Adjust chunk size to fit cache better
+//     bodies.par_chunks_mut(CHUNK_SIZE).for_each(|chunk| {
+//         for b in chunk {
+//             let delta = mouse_pos - b.pos;
+//             let dir = delta.normalize();
+//             let dist = delta.length();
+//             if dist > 2.0 {
+//                 let f_mag = G / (dist + 0.0000000001);
+//                 let f = dir * f_mag;
+//                 b.vel += f;
+//             }
+//             b.pos += b.vel;
+
+//             // Clamp pos to screen
+//             b.pos.x = b.pos.x.max(0.0).min(WINDOW_DIMS.x as f32);
+//             b.pos.y = b.pos.y.max(0.0).min(WINDOW_DIMS.y as f32);
+//         }
+//     });
+// }
 
 fn draw(
     rl: &mut RaylibHandle,
