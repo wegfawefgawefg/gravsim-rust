@@ -2,7 +2,7 @@ use glam::Vec2;
 use rayon::prelude::*;
 
 use crate::bodies::Bodies;
-use crate::config::{G, WINDOW_DIMS};
+use crate::config::{ENABLE_BOUNDS, G, WINDOW_DIMS};
 
 #[derive(Clone, Copy, Debug)]
 pub enum StepKernel {
@@ -49,6 +49,8 @@ fn apply_step(pos: &mut Vec2, vel: &mut Vec2, mouse_pos: Vec2) {
     }
     *pos += *vel;
 
-    pos.x = pos.x.clamp(0.0, WINDOW_DIMS.x as f32);
-    pos.y = pos.y.clamp(0.0, WINDOW_DIMS.y as f32);
+    if ENABLE_BOUNDS {
+        pos.x = pos.x.clamp(0.0, WINDOW_DIMS.x as f32);
+        pos.y = pos.y.clamp(0.0, WINDOW_DIMS.y as f32);
+    }
 }
