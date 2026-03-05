@@ -9,6 +9,7 @@ mod sim;
 use glam::Vec2;
 use raylib::prelude::*;
 use std::time::{Duration, Instant};
+use std::{env, process};
 
 use bodies::make_chain_bodies;
 use config::{DRAW_BUDGET, TIMESTEP, WINDOW_DIMS};
@@ -16,7 +17,8 @@ use render::{RenderMode, Renderer};
 use sim::step_chain;
 
 fn main() {
-    let mut bodies = make_chain_bodies();
+    let seed = parse_seed_arg();
+    let mut bodies = make_chain_bodies(seed);
     let mut prev_pos = vec![Vec2::ZERO; bodies.pos.len()];
 
     let (mut rl, thread) = raylib::init()
@@ -90,6 +92,30 @@ fn main() {
 
         draw_offset = (draw_offset + DRAW_BUDGET) % bodies.pos.len();
     }
+}
+
+fn parse_seed_arg() -> Option<u64> {
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--seed" | "--spawn-seed" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("missing value for {arg}");
+                    process::exit(2);
+                });
+                return Some(value.parse::<u64>().unwrap_or_else(|_| {
+                    eprintln!("invalid seed value: {value}");
+                    process::exit(2);
+                }));
+            }
+            "--help" | "-h" => {
+                println!("usage: chain_cpu [--seed <u64>]");
+                process::exit(0);
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn center_window_on_current_monitor(rl: &mut RaylibHandle) {

@@ -6,6 +6,7 @@ mod types;
 
 use config::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use state::ChainGpuState;
+use std::{env, process};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::EventLoop;
@@ -16,6 +17,7 @@ use winit::window::{Window, WindowBuilder};
 
 fn main() {
     env_logger::init();
+    let seed = parse_seed_arg();
 
     let event_loop = EventLoop::new().expect("failed to create event loop");
     let builder = WindowBuilder::new()
@@ -27,7 +29,7 @@ fn main() {
     center_window_on_primary_monitor(&event_loop, &window);
 
     let window_ref: &'static winit::window::Window = Box::leak(Box::new(window));
-    let mut state = pollster::block_on(ChainGpuState::new(window_ref));
+    let mut state = pollster::block_on(ChainGpuState::new(window_ref, seed));
 
     event_loop
         .run(move |event, target| match event {
@@ -102,4 +104,28 @@ fn scroll_steps(delta: MouseScrollDelta) -> f32 {
         MouseScrollDelta::LineDelta(_, y) => y,
         MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 40.0,
     }
+}
+
+fn parse_seed_arg() -> Option<u64> {
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--seed" | "--spawn-seed" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("missing value for {arg}");
+                    process::exit(2);
+                });
+                return Some(value.parse::<u64>().unwrap_or_else(|_| {
+                    eprintln!("invalid seed value: {value}");
+                    process::exit(2);
+                }));
+            }
+            "--help" | "-h" => {
+                println!("usage: chain_gpu [--seed <u64>]");
+                process::exit(0);
+            }
+            _ => {}
+        }
+    }
+    None
 }

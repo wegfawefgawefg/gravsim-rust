@@ -18,7 +18,8 @@ pub fn step_chain(bodies: &mut Bodies, prev_pos: &mut [Vec2]) {
         .enumerate()
         .for_each(|(i, (pos, vel))| {
             let target = prev_pos[(i + 1) % len];
-            *vel = (target - *pos).normalize_or_zero() * CHAIN_FIXED_SPEED;
+            let delta = target - *pos;
+            *vel = delta.normalize() * CHAIN_FIXED_SPEED;
             *pos += *vel;
 
             if ENABLE_BOUNDS {

@@ -1,4 +1,4 @@
-use rand::{thread_rng, Rng};
+use rand::{rngs::StdRng, thread_rng, Rng, SeedableRng};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -36,26 +36,46 @@ pub fn make_chain_particles(
     width: u32,
     height: u32,
     use_grid_spawn: bool,
+    spawn_seed: Option<u64>,
 ) -> Vec<Particle> {
     if use_grid_spawn {
         return make_chain_particles_grid(count, width, height);
     }
-    make_chain_particles_random(count, width, height)
+    make_chain_particles_random(count, width, height, spawn_seed)
 }
 
-fn make_chain_particles_random(count: u32, width: u32, height: u32) -> Vec<Particle> {
-    let mut rng = thread_rng();
+fn make_chain_particles_random(
+    count: u32,
+    width: u32,
+    height: u32,
+    spawn_seed: Option<u64>,
+) -> Vec<Particle> {
     let mut particles = Vec::with_capacity(count as usize);
 
-    for _ in 0..count {
-        let pos = [
-            rng.gen_range(0.0..width as f32),
-            rng.gen_range(0.0..height as f32),
-        ];
-        particles.push(Particle {
-            pos,
-            vel: [0.0, 0.0],
-        });
+    if let Some(seed) = spawn_seed {
+        let mut rng = StdRng::seed_from_u64(seed);
+        for _ in 0..count {
+            let pos = [
+                rng.gen_range(0.0..width as f32),
+                rng.gen_range(0.0..height as f32),
+            ];
+            particles.push(Particle {
+                pos,
+                vel: [0.0, 0.0],
+            });
+        }
+    } else {
+        let mut rng = thread_rng();
+        for _ in 0..count {
+            let pos = [
+                rng.gen_range(0.0..width as f32),
+                rng.gen_range(0.0..height as f32),
+            ];
+            particles.push(Particle {
+                pos,
+                vel: [0.0, 0.0],
+            });
+        }
     }
 
     particles

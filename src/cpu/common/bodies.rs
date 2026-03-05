@@ -1,5 +1,5 @@
 use glam::Vec2;
-use rand::{thread_rng, Rng};
+use rand::{rngs::StdRng, thread_rng, Rng, SeedableRng};
 
 use crate::config::{CHAIN_USE_GRID_SPAWN, NUM_BODIES, WINDOW_CENTER, WINDOW_DIMS};
 
@@ -30,25 +30,35 @@ pub fn make_bodies() -> Bodies {
     Bodies { pos, vel }
 }
 
-pub fn make_chain_bodies() -> Bodies {
+pub fn make_chain_bodies(spawn_seed: Option<u64>) -> Bodies {
     let pos = if CHAIN_USE_GRID_SPAWN {
         make_grid_positions(NUM_BODIES)
     } else {
-        make_random_positions(NUM_BODIES)
+        make_random_positions(NUM_BODIES, spawn_seed)
     };
     let vel = vec![Vec2::ZERO; NUM_BODIES];
     Bodies { pos, vel }
 }
 
-fn make_random_positions(count: usize) -> Vec<Vec2> {
-    let mut rng = thread_rng();
+fn make_random_positions(count: usize, spawn_seed: Option<u64>) -> Vec<Vec2> {
     let mut pos = Vec::with_capacity(count);
 
-    for _ in 0..count {
-        pos.push(Vec2::new(
-            rng.gen_range(0.0..WINDOW_DIMS.x as f32),
-            rng.gen_range(0.0..WINDOW_DIMS.y as f32),
-        ));
+    if let Some(seed) = spawn_seed {
+        let mut rng = StdRng::seed_from_u64(seed);
+        for _ in 0..count {
+            pos.push(Vec2::new(
+                rng.gen_range(0.0..WINDOW_DIMS.x as f32),
+                rng.gen_range(0.0..WINDOW_DIMS.y as f32),
+            ));
+        }
+    } else {
+        let mut rng = thread_rng();
+        for _ in 0..count {
+            pos.push(Vec2::new(
+                rng.gen_range(0.0..WINDOW_DIMS.x as f32),
+                rng.gen_range(0.0..WINDOW_DIMS.y as f32),
+            ));
+        }
     }
 
     pos

@@ -30,13 +30,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let target_pos = src_particles[next_i].pos;
 
     let delta = target_pos - p.pos;
-    let dist_sq = dot(delta, delta);
-    if (dist_sq > 1e-12) {
-        let inv_len = inverseSqrt(dist_sq);
-        p.vel = delta * inv_len * params.sim.x;
-    } else {
-        p.vel = vec2<f32>(0.0, 0.0);
-    }
+    let inv_len = inverseSqrt(dot(delta, delta));
+    p.vel = delta * inv_len * params.sim.x;
     p.pos += p.vel;
 
     if (params.sim.y > 0.5) {

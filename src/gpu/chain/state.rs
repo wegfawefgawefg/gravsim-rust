@@ -38,7 +38,7 @@ pub struct ChainGpuState {
 }
 
 impl ChainGpuState {
-    pub async fn new(window: &'static winit::window::Window) -> Self {
+    pub async fn new(window: &'static winit::window::Window, spawn_seed: Option<u64>) -> Self {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance
@@ -100,6 +100,7 @@ impl ChainGpuState {
             config.width,
             config.height,
             CHAIN_USE_GRID_SPAWN,
+            spawn_seed,
         );
         let particle_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("chain_particle_a"),
