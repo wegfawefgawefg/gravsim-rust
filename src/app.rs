@@ -4,14 +4,14 @@ use std::time::{Duration, Instant};
 
 use crate::bodies::Bodies;
 use crate::config::{DRAW_BUDGET, TIMESTEP};
-use crate::render::draw;
-use crate::sim::step;
+use crate::render::Renderer;
+use crate::sim::{step_with_kernel, StepKernel};
 
 pub fn run_interactive(
     rl: &mut RaylibHandle,
     thread: &RaylibThread,
     bodies: &mut Bodies,
-    texture: &mut RenderTexture2D,
+    renderer: &mut Renderer,
 ) {
     let mut time_since_last_update = 0.0;
     let mut draw_offset = 0;
@@ -32,17 +32,17 @@ pub fn run_interactive(
         while time_since_last_update > TIMESTEP {
             time_since_last_update -= TIMESTEP;
             let step_start = Instant::now();
-            step(bodies, mouse_pos);
+            // Keep zip kernel for interactive; benchmark mode can test chunked variants.
+            step_with_kernel(bodies, mouse_pos, StepKernel::Zip);
             step_time_total += step_start.elapsed();
             steps_sampled += 1;
         }
 
         let draw_start = Instant::now();
-        draw(
+        renderer.draw(
             rl,
             thread,
             &bodies.pos,
-            texture,
             draw_offset,
             mouse_pos,
             &perf_overlay,

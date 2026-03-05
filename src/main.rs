@@ -11,6 +11,7 @@ use app::run_interactive;
 use benchmark::{parse_benchmark_config, run_benchmark};
 use bodies::make_bodies;
 use config::WINDOW_DIMS;
+use render::Renderer;
 
 fn main() {
     let benchmark = parse_benchmark_config();
@@ -23,16 +24,14 @@ fn main() {
 
     center_window_on_current_monitor(&mut rl);
 
-    let mut texture = rl
-        .load_render_texture(&thread, WINDOW_DIMS.x as u32, WINDOW_DIMS.y as u32)
-        .unwrap();
+    let mut renderer = Renderer::new(&mut rl, &thread).unwrap();
 
     if let Some(config) = benchmark {
-        run_benchmark(&mut rl, &thread, &mut bodies, &mut texture, &config);
+        run_benchmark(&mut rl, &thread, &mut bodies, &mut renderer, &config);
         return;
     }
 
-    run_interactive(&mut rl, &thread, &mut bodies, &mut texture);
+    run_interactive(&mut rl, &thread, &mut bodies, &mut renderer);
 }
 
 fn center_window_on_current_monitor(rl: &mut RaylibHandle) {

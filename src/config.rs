@@ -9,3 +9,4 @@ pub const G: f32 = 40.0;
 pub const DRAW_BUDGET: usize = 200_000;
 pub const FADE_AMOUNT: u8 = 24;
 pub const PIXEL_BRIGHTNESS: u8 = 20;
+pub const DEFAULT_STEP_CHUNK_SIZE: usize = 16_384;
