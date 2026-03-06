@@ -20,6 +20,14 @@ struct FadeParams {
     rgba: [f32; 4],
 }
 
+struct ParticleShard {
+    count: u32,
+    _buffer: wgpu::Buffer,
+    params_buffer: wgpu::Buffer,
+    compute_bind_group: wgpu::BindGroup,
+    render_bind_group: wgpu::BindGroup,
+}
+
 pub struct GpuState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -27,11 +35,11 @@ pub struct GpuState {
     config: wgpu::SurfaceConfiguration,
     size: PhysicalSize<u32>,
 
-    particle_count: u32,
-    _particle_buffer: wgpu::Buffer,
-    params_buffer: wgpu::Buffer,
-    compute_bind_group: wgpu::BindGroup,
-    render_bind_group: wgpu::BindGroup,
+    total_particle_count: u64,
+    particles_per_shard_max: u32,
+    supports_shader_f16: bool,
+    present_mode: wgpu::PresentMode,
+    shards: Vec<ParticleShard>,
     compute_pipeline: wgpu::ComputePipeline,
     render_pipeline: wgpu::RenderPipeline,
 
@@ -48,7 +56,6 @@ pub struct GpuState {
     blit_pipeline: wgpu::RenderPipeline,
 
     mouse_pos: [f32; 2],
-    present_mode: wgpu::PresentMode,
     frame_counter: u32,
     stats_window_start: Instant,
 }
@@ -70,7 +77,10 @@ impl GpuState {
             .await
             .expect("no suitable GPU adapters found");
 
+        let adapter_features = adapter.features();
+        let supports_shader_f16 = adapter_features.contains(wgpu::Features::SHADER_F16);
         let limits = adapter.limits();
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -103,50 +113,6 @@ impl GpuState {
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
-
-        let max_particles = max_supported_particles(&limits);
-        let particle_count = NUM_PARTICLES.min(max_particles);
-        if particle_count < NUM_PARTICLES {
-            eprintln!(
-                "requested {} particles but device/storage limits allow {}; clamping",
-                NUM_PARTICLES, particle_count
-            );
-        }
-        if particle_count == 0 {
-            panic!("device limits are too small for even one particle buffer element");
-        }
-
-        let particles = make_particles(particle_count, config.width, config.height);
-        let particle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("particle_buffer"),
-            contents: bytemuck::cast_slice(&particles),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let target = gravity_target(
-            [config.width as f32 * 0.5, config.height as f32 * 0.5],
-            config.width,
-            config.height,
-        );
-        let params = SimParams {
-            target_window: [
-                target[0],
-                target[1],
-                config.width as f32,
-                config.height as f32,
-            ],
-            sim: [
-                G,
-                if ENABLE_BOUNDS { 1.0 } else { 0.0 },
-                particle_count as f32,
-                0.0,
-            ],
-        };
-        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("params_buffer"),
-            contents: bytemuck::bytes_of(&params),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
 
         let compute_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("compute_bgl"),
@@ -198,6 +164,34 @@ impl GpuState {
                 },
             ],
         });
+
+        let particles_per_shard_max = max_particles_per_shard(&limits);
+        if particles_per_shard_max == 0 {
+            panic!("device limits are too small for even one particle element");
+        }
+        let requested_particles = NUM_PARTICLES as u64;
+        let shards = create_particle_shards(
+            &device,
+            &compute_bgl,
+            &render_bgl,
+            requested_particles,
+            particles_per_shard_max,
+            config.width,
+            config.height,
+        );
+        let total_particle_count = shards.iter().map(|s| s.count as u64).sum::<u64>();
+
+        println!(
+            "gpu caps: shader_f16={} max_storage_binding_bytes={} max_buffer_bytes={} max_particles_per_shard={} requested_particles={} shard_count={} allocated_particles={}",
+            supports_shader_f16,
+            limits.max_storage_buffer_binding_size,
+            limits.max_buffer_size,
+            particles_per_shard_max,
+            requested_particles,
+            shards.len(),
+            total_particle_count
+        );
+
         let fade_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fade_bgl"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -233,35 +227,6 @@ impl GpuState {
                     },
                 ],
             });
-
-        let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("compute_bg"),
-            layout: &compute_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: particle_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ],
-        });
-        let render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("render_bg"),
-            layout: &render_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: particle_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ],
-        });
 
         let fade_params = FadeParams {
             rgba: [0.0, 0.0, 0.0, FADE_ALPHA],
@@ -437,11 +402,11 @@ impl GpuState {
             queue,
             config,
             size,
-            particle_count,
-            _particle_buffer: particle_buffer,
-            params_buffer,
-            compute_bind_group,
-            render_bind_group,
+            total_particle_count,
+            particles_per_shard_max,
+            supports_shader_f16,
+            present_mode,
+            shards,
             compute_pipeline,
             render_pipeline,
             fade_enabled: DEFAULT_FADE_ENABLED,
@@ -456,7 +421,6 @@ impl GpuState {
             blit_bind_group,
             blit_pipeline,
             mouse_pos: [f32_half(size.width), f32_half(size.height)],
-            present_mode,
             frame_counter: 0,
             stats_window_start: Instant::now(),
         }
@@ -505,23 +469,7 @@ impl GpuState {
     }
 
     pub fn render(&mut self, window: &winit::window::Window) -> Result<(), wgpu::SurfaceError> {
-        let target = gravity_target(self.mouse_pos, self.config.width, self.config.height);
-        let params = SimParams {
-            target_window: [
-                target[0],
-                target[1],
-                self.config.width as f32,
-                self.config.height as f32,
-            ],
-            sim: [
-                G,
-                if ENABLE_BOUNDS { 1.0 } else { 0.0 },
-                self.particle_count as f32,
-                0.0,
-            ],
-        };
-        self.queue
-            .write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&params));
+        self.write_shard_params();
 
         let frame = self.surface.get_current_texture()?;
         let surface_view = frame
@@ -540,9 +488,11 @@ impl GpuState {
                 timestamp_writes: None,
             });
             compute_pass.set_pipeline(&self.compute_pipeline);
-            compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
-            let workgroups = self.particle_count.div_ceil(WORKGROUP_SIZE);
-            compute_pass.dispatch_workgroups(workgroups, 1, 1);
+            for shard in &self.shards {
+                compute_pass.set_bind_group(0, &shard.compute_bind_group, &[]);
+                let workgroups = shard.count.div_ceil(WORKGROUP_SIZE);
+                compute_pass.dispatch_workgroups(workgroups, 1, 1);
+            }
         }
 
         {
@@ -572,8 +522,10 @@ impl GpuState {
             }
 
             trail_pass.set_pipeline(&self.render_pipeline);
-            trail_pass.set_bind_group(0, &self.render_bind_group, &[]);
-            trail_pass.draw(0..self.particle_count, 0..1);
+            for shard in &self.shards {
+                trail_pass.set_bind_group(0, &shard.render_bind_group, &[]);
+                trail_pass.draw(0..shard.count, 0..1);
+            }
         }
         self.trail_initialized = true;
 
@@ -607,20 +559,26 @@ impl GpuState {
         let elapsed = self.stats_window_start.elapsed();
         if elapsed >= Duration::from_secs(1) {
             let fps = self.frame_counter as f64 / elapsed.as_secs_f64();
+            let frame_ms = 1000.0 / fps.max(0.1);
+            let fade_status = if self.fade_enabled { "on" } else { "off" };
             window.set_title(&format!(
-                "gravsim wgpu | {} particles | {:.1} FPS | present {:?} | fade {}",
-                self.particle_count,
+                "gravsim wgpu | {} particles | {} shards | {:.1} FPS | present {:?} | fade {}",
+                self.total_particle_count,
+                self.shards.len(),
                 fps,
                 self.present_mode,
-                if self.fade_enabled { "on" } else { "off" }
+                fade_status
             ));
             println!(
-                "wgpu stats: particles={} fps={:.1} frame_ms={:.3} present={:?} fade={}",
-                self.particle_count,
+                "wgpu stats: particles={} shards={} max_per_shard={} fps={:.1} frame_ms={:.3} present={:?} fade={} shader_f16={}",
+                self.total_particle_count,
+                self.shards.len(),
+                self.particles_per_shard_max,
                 fps,
-                1000.0 / fps.max(0.1),
+                frame_ms,
                 self.present_mode,
-                if self.fade_enabled { "on" } else { "off" }
+                fade_status,
+                self.supports_shader_f16
             );
             self.frame_counter = 0;
             self.stats_window_start = Instant::now();
@@ -628,6 +586,111 @@ impl GpuState {
 
         Ok(())
     }
+
+    fn write_shard_params(&mut self) {
+        let target = gravity_target(self.mouse_pos, self.config.width, self.config.height);
+        for shard in &self.shards {
+            let params = SimParams {
+                target_window: [
+                    target[0],
+                    target[1],
+                    self.config.width as f32,
+                    self.config.height as f32,
+                ],
+                sim: [
+                    G,
+                    if ENABLE_BOUNDS { 1.0 } else { 0.0 },
+                    shard.count as f32,
+                    0.0,
+                ],
+            };
+            self.queue
+                .write_buffer(&shard.params_buffer, 0, bytemuck::bytes_of(&params));
+        }
+    }
+}
+
+fn create_particle_shards(
+    device: &wgpu::Device,
+    compute_bgl: &wgpu::BindGroupLayout,
+    render_bgl: &wgpu::BindGroupLayout,
+    requested_particles: u64,
+    max_particles_per_shard: u32,
+    width: u32,
+    height: u32,
+) -> Vec<ParticleShard> {
+    let mut remaining = requested_particles;
+    let mut shards = Vec::new();
+
+    while remaining > 0 {
+        let this_count = remaining.min(max_particles_per_shard as u64) as u32;
+        let particles = make_particles(this_count, width, height);
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("particle_shard_buffer"),
+            contents: bytemuck::cast_slice(&particles),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let params = SimParams {
+            target_window: [
+                width as f32 * 0.5,
+                height as f32 * 0.5,
+                width as f32,
+                height as f32,
+            ],
+            sim: [
+                G,
+                if ENABLE_BOUNDS { 1.0 } else { 0.0 },
+                this_count as f32,
+                0.0,
+            ],
+        };
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("particle_shard_params_buffer"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("particle_shard_compute_bg"),
+            layout: compute_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+        let render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("particle_shard_render_bg"),
+            layout: render_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        shards.push(ParticleShard {
+            count: this_count,
+            _buffer: buffer,
+            params_buffer,
+            compute_bind_group,
+            render_bind_group,
+        });
+        remaining -= this_count as u64;
+    }
+
+    shards
 }
 
 fn create_trail_target(
@@ -674,7 +737,7 @@ fn create_blit_bind_group(
     })
 }
 
-fn max_supported_particles(limits: &wgpu::Limits) -> u32 {
+fn max_particles_per_shard(limits: &wgpu::Limits) -> u32 {
     let bytes_per_particle = std::mem::size_of::<Particle>() as u64;
     let max_storage_binding_bytes = limits.max_storage_buffer_binding_size as u64;
     let max_buffer_bytes = limits.max_buffer_size;
