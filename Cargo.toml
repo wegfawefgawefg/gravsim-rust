@@ -2,7 +2,7 @@
 name = "gravsim-rust"
 version = "0.1.0"
 edition = "2021"
-default-run = "gravsim-rust"
+default-run = "grav2mouse_cpu"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -18,11 +18,11 @@ wgpu = "0.19.4"
 winit = "0.29.15"
 
 [[bin]]
-name = "gravsim-rust"
+name = "grav2mouse_cpu"
 path = "src/cpu/particle_sim/main.rs"
 
 [[bin]]
-name = "wgpu_main"
+name = "grav2mouse_gpu"
 path = "src/gpu/particle_sim/main.rs"
 
 [[bin]]

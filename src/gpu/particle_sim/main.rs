@@ -44,6 +44,8 @@ fn main() {
                     WindowEvent::KeyboardInput { event, .. } => {
                         if is_escape_pressed(&event) {
                             target.exit();
+                        } else if is_toggle_fade_pressed(&event) {
+                            state.toggle_fade();
                         }
                     }
                     WindowEvent::CursorMoved { position, .. } => {
@@ -87,4 +89,9 @@ fn configure_window_builder(builder: WindowBuilder) -> WindowBuilder {
 fn is_escape_pressed(event: &winit::event::KeyEvent) -> bool {
     event.state == ElementState::Pressed
         && matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape))
+}
+
+fn is_toggle_fade_pressed(event: &winit::event::KeyEvent) -> bool {
+    event.state == ElementState::Pressed
+        && matches!(event.physical_key, PhysicalKey::Code(KeyCode::KeyF))
 }
