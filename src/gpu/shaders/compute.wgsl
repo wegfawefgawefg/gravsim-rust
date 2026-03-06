@@ -14,11 +14,14 @@ var<storage, read_write> particles: array<Particle>;
 @group(0) @binding(1)
 var<uniform> params: Params;
 
+const MAX_DISPATCH_GROUPS_X: u32 = 65535u;
+const WORKGROUP_SIZE_X: u32 = 256u;
+
 @compute @workgroup_size(256)
 fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    let count = u32(params.sim.z);
-    if (i >= count) {
+    let i = gid.x + gid.y * (MAX_DISPATCH_GROUPS_X * WORKGROUP_SIZE_X);
+    let count = arrayLength(&particles);
+    if (i >= count || count == 0u) {
         return;
     }
 

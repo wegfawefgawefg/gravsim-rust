@@ -5,7 +5,7 @@ use winit::dpi::PhysicalSize;
 
 use crate::config::{
     gravity_target, pick_present_mode, BLOCK_ON_GPU_EACH_FRAME, DEFAULT_FADE_ENABLED,
-    ENABLE_BOUNDS, FADE_ALPHA, G, NUM_PARTICLES, WORKGROUP_SIZE,
+    ENABLE_BOUNDS, FADE_ALPHA, G, NUM_PARTICLES, POINT_ALPHA, WORKGROUP_SIZE,
 };
 use crate::types::{make_particles, Particle, SimParams};
 
@@ -13,6 +13,7 @@ const COMPUTE_SHADER: &str = include_str!("../shaders/compute.wgsl");
 const RENDER_SHADER: &str = include_str!("../shaders/render.wgsl");
 const FADE_SHADER: &str = include_str!("../shaders/fade_overlay.wgsl");
 const BLIT_SHADER: &str = include_str!("../shaders/blit_texture.wgsl");
+const MAX_DISPATCH_GROUPS_PER_DIM: u32 = 65_535;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -490,8 +491,8 @@ impl GpuState {
             compute_pass.set_pipeline(&self.compute_pipeline);
             for shard in &self.shards {
                 compute_pass.set_bind_group(0, &shard.compute_bind_group, &[]);
-                let workgroups = shard.count.div_ceil(WORKGROUP_SIZE);
-                compute_pass.dispatch_workgroups(workgroups, 1, 1);
+                let (dispatch_x, dispatch_y) = dispatch_dims_for_count(shard.count);
+                compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
             }
         }
 
@@ -601,7 +602,7 @@ impl GpuState {
                     G,
                     if ENABLE_BOUNDS { 1.0 } else { 0.0 },
                     shard.count as f32,
-                    0.0,
+                    POINT_ALPHA,
                 ],
             };
             self.queue
@@ -642,7 +643,7 @@ fn create_particle_shards(
                 G,
                 if ENABLE_BOUNDS { 1.0 } else { 0.0 },
                 this_count as f32,
-                0.0,
+                POINT_ALPHA,
             ],
         };
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -744,6 +745,23 @@ fn max_particles_per_shard(limits: &wgpu::Limits) -> u32 {
     let max_bytes = max_storage_binding_bytes.min(max_buffer_bytes);
     let max_particles = max_bytes / bytes_per_particle;
     max_particles.min(u32::MAX as u64) as u32
+}
+
+fn dispatch_dims_for_count(count: u32) -> (u32, u32) {
+    let total_workgroups = count.div_ceil(WORKGROUP_SIZE);
+    if total_workgroups <= MAX_DISPATCH_GROUPS_PER_DIM {
+        return (total_workgroups.max(1), 1);
+    }
+
+    let dispatch_x = MAX_DISPATCH_GROUPS_PER_DIM;
+    let dispatch_y = total_workgroups.div_ceil(dispatch_x);
+    if dispatch_y > MAX_DISPATCH_GROUPS_PER_DIM {
+        panic!(
+            "particle count {} requires dispatch_y={} > max {}; reduce particle count or increase workgroup size",
+            count, dispatch_y, MAX_DISPATCH_GROUPS_PER_DIM
+        );
+    }
+    (dispatch_x, dispatch_y.max(1))
 }
 
 fn f32_half(v: u32) -> f32 {

@@ -27,7 +27,7 @@ fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOut {
 
     var out: VertexOut;
     out.pos = vec4<f32>(x, y, 0.0, 1.0);
-    out.color = vec4<f32>(1.0, 1.0, 1.0, 0.25);
+    out.color = vec4<f32>(1.0, 1.0, 1.0, params.sim.w);
     return out;
 }
 

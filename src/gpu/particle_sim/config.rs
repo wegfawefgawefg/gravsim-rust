@@ -1,13 +1,14 @@
 pub const WINDOW_WIDTH: u32 = 1280;
 pub const WINDOW_HEIGHT: u32 = 720;
-pub const NUM_PARTICLES: u32 = 20_000_000;
+pub const NUM_PARTICLES: u32 = 8_000_000;
 pub const G: f32 = 8.0;
 pub const ENABLE_BOUNDS: bool = true;
 pub const USE_MOUSE_GRAVITY: bool = true;
 pub const WORKGROUP_SIZE: u32 = 256;
-pub const BLOCK_ON_GPU_EACH_FRAME: bool = true;
-pub const DEFAULT_FADE_ENABLED: bool = false;
-pub const FADE_ALPHA: f32 = 0.1;
+pub const BLOCK_ON_GPU_EACH_FRAME: bool = false;
+pub const DEFAULT_FADE_ENABLED: bool = true;
+pub const FADE_ALPHA: f32 = 0.8;
+pub const POINT_ALPHA: f32 = 0.01;
 
 #[derive(Clone, Copy, Debug)]
 pub enum PresentModePreference {
